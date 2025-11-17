@@ -31,7 +31,7 @@ The script prints:
 ## How to Run
 
 ```
-python Snow_alaysis.py
+python Snow_analysis.py
 ```
 
 ## Dependencies
