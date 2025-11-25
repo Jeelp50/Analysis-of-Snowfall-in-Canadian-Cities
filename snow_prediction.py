@@ -320,61 +320,101 @@ def plot_feature_importance_linear(model, feature_names):
     print(f"✓ Saved feature importance plot: {out_path}")
 
 # ========================================================================
-# PREDICTIVE BLOCK 7 — Per-City Prediction Plot (OTTAWA)
+# PREDICTIVE BLOCK 7 — Clean Per-City Prediction Plot (OTTAWA)
 # ========================================================================
 
 def plot_city_predictions(merged_df, model, features_df, city_name="OTTAWA"):
     """
-    Plots actual vs predicted SWE over time for a specific city.
-    Uses the model to generate predictions across all years for that city.
+    Plots actual vs predicted SWE for a specific city using a single
+    dominant station to avoid duplicates. No forecasting. No double data.
     """
 
-    # Filter merged dataset for OTTAWA-like stations
+    # -----------------------------------------------------------
+    # 1. Find all stations matching the city name
+    # -----------------------------------------------------------
     city_df = merged_df[merged_df["station_name"].str.contains(city_name, case=False, na=False)]
 
     if city_df.empty:
         print(f"⚠ No station found for city name containing '{city_name}'.")
         return
 
-    station_ids = city_df["station_index"].unique()
+    # Choose the station with the most years of data (prevents duplicates)
+    station_counts = city_df["station_index"].value_counts()
+    best_station = station_counts.idxmax()
 
-    # Pull feature rows for these stations
-    city_features = features_df[features_df["station_index"].isin(station_ids)].copy()
+    print(f"✓ Using station {best_station} for {city_name}")
 
-    if city_features.empty:
-        print(f"⚠ No feature rows found for {city_name}.")
+    # -----------------------------------------------------------
+    # 2. Extract ACTUAL values (merged_df)
+    # -----------------------------------------------------------
+    city_actual = (
+        merged_df[merged_df["station_index"] == best_station]
+        .sort_values("year")[["year", "snw_total"]]
+        .drop_duplicates(subset="year")
+    )
+
+    # -----------------------------------------------------------
+    # 3. Extract PREDICTED values (features_df)
+    # -----------------------------------------------------------
+    city_pred = (
+        features_df[features_df["station_index"] == best_station]
+        .sort_values("year")
+        .drop_duplicates(subset="year")
+    )
+
+    if city_pred.empty:
+        print(f"⚠ No feature rows available for predictions for {city_name}.")
         return
 
-    # Extract input features
-    X_city = city_features[["lat", "lon", "elevation", "last_year_swe", "neighbor_last_year_swe"]].values
+    # Build model input matrix
+    feature_cols = ["lat", "lon", "elevation", "last_year_swe", "neighbor_last_year_swe"]
+    feature_cols = [c for c in feature_cols if c in city_pred.columns]
 
-    # Predict using model
-    city_features["prediction"] = model.predict(X_city)
+    if not feature_cols:
+        print(f"⚠ Missing necessary feature columns for prediction.")
+        print("Available:", city_pred.columns.tolist())
+        return
 
-    # Plot
+    X_city = city_pred[feature_cols].values
+    city_pred["prediction"] = model.predict(X_city)
+
+    # -----------------------------------------------------------
+    # 4. Merge ACTUAL + PREDICTED (inner join on year)
+    # -----------------------------------------------------------
+    merged_plot = pd.merge(city_actual, city_pred[["year", "prediction"]], on="year", how="inner")
+
+    if merged_plot.empty:
+        print(f"⚠ No overlapping years between actual and predicted data for {city_name}.")
+        return
+
+    # -----------------------------------------------------------
+    # 5. Final Plot (no duplicates, no extra lines)
+    # -----------------------------------------------------------
     plt.figure(figsize=(12, 6))
 
     plt.plot(
-        city_features["year"],
-        city_features["snw_total"],
+        merged_plot["year"],
+        merged_plot["snw_total"],
         marker="o",
-        linewidth=2,
-        label="Actual SWE",
-        color="#4E79A7"
+        linewidth=3,
+        color="#4E79A7",
+        label="Actual SWE"
     )
 
     plt.plot(
-        city_features["year"],
-        city_features["prediction"],
+        merged_plot["year"],
+        merged_plot["prediction"],
         marker="o",
-        linewidth=2,
-        label="Predicted SWE",
-        color="#F28E2B"
+        linewidth=3,
+        linestyle="--",
+        color="#F28E2B",
+        label="Predicted SWE"
     )
 
-    plt.title(f"Actual vs Predicted Winter SWE — {city_name.title()}", fontsize=15, fontweight="bold")
-    plt.xlabel("Year", fontsize=13)
-    plt.ylabel("Winter SWE (mm)", fontsize=13)
+    plt.title(f"Actual vs Predicted Winter SWE — {city_name.title()}",
+              fontsize=16, fontweight="bold")
+    plt.xlabel("Year", fontsize=14)
+    plt.ylabel("Winter SWE (mm)", fontsize=14)
     plt.grid(alpha=0.3)
     plt.legend()
 
@@ -382,7 +422,8 @@ def plot_city_predictions(merged_df, model, features_df, city_name="OTTAWA"):
     plt.savefig(out_path, dpi=300)
     plt.close()
 
-    print(f"✓ Saved {city_name.title()} prediction plot: {out_path}")
+    print(f"✓ Saved clean {city_name.title()} prediction plot: {out_path}")
+
 
 
 
